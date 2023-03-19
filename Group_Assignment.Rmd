@@ -1,0 +1,177 @@
+---
+title: "Group_Assignment"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Problem 1
+```{r}
+library(dplyr)
+data <- read.csv("microvan.csv", sep = ";")
+library(data.table)
+data <- as.data.table(lapply(data,as.numeric))
+summary(data)
+
+```
+
+```{r}
+#Create a boxplot to visualize the distribution of data
+library(ggplot2)
+for (var in names(data)) {
+  p <- ggplot(data, aes(x = 1, y = data[[var]])) +
+    geom_boxplot() +
+    labs(title = var, x = "", y = var) +
+    theme_bw()
+  print(p)
+}
+```
+```{r}
+
+# Calculate frequency distributions for all variables
+freq_distributions <- lapply(data[,2:39], table)
+print(freq_distributions)
+```
+
+```{r}
+for (var in names(data)) {
+  p <- ggplot(data, aes(x = data[[var]])) +
+    geom_histogram() +
+    labs(title = var, x = "", y = "Frequency") +
+    theme_bw()
+  print(p)
+}
+```
+
+```{r}
+# Select variables 3 to 32 from your data
+data_subset <- data %>% 
+  select(3:32)
+
+# Compute the correlation matrix
+corr <- cor(data_subset)
+
+# Create a ggplot object for the correlation matrix
+p <- ggplot(data = reshape2::melt(corr), aes(x = Var1, y = Var2, fill = value)) + 
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +
+  labs(title = "Correlation Matrix") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, margin = margin(t = 10, r = 10, b = 10, l = 10)))
+  
+
+# Display the plot
+print(p)
+
+library(corrplot)
+corrplot( cor(data_subset), 
+         method = "number", 
+         type = "upper", 
+         order = "hclust", # reorder by the size of the correlation coefficients
+         tl.cex = 0.5, # font size of the variable labels
+         tl.col = "black", # color of the variable labels
+         tl.srt = 45, # rotation angle for the variable labels
+         number.cex = 0.3 # font size of the coefficients
+)
+```
+>From above matrix we can see there are many variables with strong correlation, like kidsbulk and kidtrans, aftrschl and kidtrans. 
+
+```{r}
+#remove any observations with a value higher than 3 standard deviations from the mean
+library(dplyr)
+data_filtered <- data %>%
+  select(2:32) %>% 
+  filter_all(all_vars(. < mean(.) + 3*sd(.))) 
+```
+
+>Combining the box plot and distribution chart, we can find that the outliers mainly exist in the variable - income, which may be caused by the misunderstanding of the respondents. After eliminate the outliers we still have 385 obs. of 31 variables(one dependent variable and 30 independent variables)
+
+# Problem2
+
+
+```{r}
+# regress mvliking against all columns except the first one
+my_lm <- lm(mvliking ~ ., data = data_filtered) 
+summary(my_lm) 
+
+```
+
+> As we can see from the result of the regression, just as expected, there are only a few the corresponding coefficient estimates of the variables like kidtrans, lthrbetr and shdcarpl being statistically significant at the 95% confidence. It's possible that strongly correlated variables lead to unstable and/or insignificant coefficients in the regression model and cause multicollinearity. 
+
+```{r}
+library(olsrr)
+# Use stepwise regression to select the best subset of variables based on p-value
+step_model <- ols_step_both_p(my_lm,slstay = 0.05, direction = "both", trace = FALSE)
+
+# Print the summary of the final selected model
+step_model
+```
+
+```{r}
+select_data <- c("noparkrm","carefmny","carefmny", "suvcmpct", "shdcarpl","lthrbetr","miniboxy","homlrgst","twoincom","strngwrn","tkvacatn")
+data_selected <- data_filtered %>%
+  select(mvliking, all_of(select_data))
+fin_my_lm <- lm(mvliking ~ ., data = data_selected)
+summary(fin_my_lm)
+```
+
+```{r}
+# Generate residuals
+resid <- residuals(fin_my_lm)
+# Generate residual plot
+plot(fitted(fin_my_lm), resid, xlab = "Fitted Values", ylab = "Residuals",
+     main = "Residual Plot")
+```
+> It's obvious thatlinear relationships are in the residual plots which means the model may have missing linear relationships, or the linear relationships included in the model may not be sufficient to explain the variance in the data.
+Stepwise regression can be a controversial method, as it can be prone to overfitting and may not always select the "best" model. The output of the stepwise regression does not explicitly tell us if there is overfitting in the model.verfitting occurs when the model is too complex and fits the noise in the data rather than the underlying signal. 
+
+# Problem 3
+
+>If the management aims for massive data reduction and increased understanding and communicability of the survey results, the objectives of factor analysis should be data reduction. Furthermore,after removing the outliers we could say variables are measured with little error. Thus,I prefer to use principal component analysis.
+
+```{r}
+mydata <- data_filtered[,2:31]
+# Standardize the variables of interest
+psych::describe(mydata[-1], fast = TRUE)
+vars <- scale(data_filtered[,-1])
+psych::describe(vars, fast = T)
+```
+```{r}
+# Find the eigenvalues
+cor <- cor(mydata)
+EV = eigen(cor)$values
+cumsum(EV/length(EV))
+library(psych)
+scree(cor, pc = TRUE, factors = FALSE)
+plot(cumsum(EV/length(EV)), 
+     type = "o", 
+     col = "darkblue",
+     pch = 16, 
+     cex = 1, 
+     xlab = "Number of factors", 
+     ylab = "Cumulative variance explained", 
+     lwd = 2) 
+abline(v = 5, lwd = 2, col = "grey") 
+```
+>Based on the scree plot, we choose five factors (components) for our analysis because their eigenvalues are larger than 1, and together they explain 69.33 percent of the variance in the data.
+
+```{r}
+library(psych) 
+PCA <- principal(r = cor, 
+                 nfactors = 5, 
+                 rotate="varimax",
+                 scores = TRUE)
+print(PCA, 
+      digits = 3, 
+      cut = 0.4, 
+      sort = TRUE 
+)
+fa.diagram(PCA, cut = 0.6, label = colnames(data), cex = 0.8, gap = 1) 
+```
+```{r}
+library(data.table)
+L <- as.data.table(unclass(PCA$loadings), keep.rownames = T)
+L
+```
+
+
+
